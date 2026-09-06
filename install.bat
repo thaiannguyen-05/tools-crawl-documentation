@@ -49,9 +49,9 @@ if not exist ".venv" (
 )
 
 REM 3. Kich hoat .venv
-call .venv\Scriptsctivate.bat
+call .venv\Scripts\activate.bat
 if %ERRORLEVEL% NEQ 0 (
-    echo ❌ Khong kich hoat duoc .venv\Scriptsctivate.bat
+    echo ❌ Khong kich hoat duoc .venv\Scripts\activate.bat
     pause
     exit /b 1
 )

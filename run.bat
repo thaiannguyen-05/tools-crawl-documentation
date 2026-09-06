@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist ".venv\Scriptsctivate.bat" (
+if not exist ".venv\Scripts\activate.bat" (
     echo =================================================================
     echo [THONG BAO] Chua thay thu muc .venv. Dang chuyen sang cai dat...
     echo =================================================================
@@ -15,7 +15,7 @@ if not exist ".venv\Scriptsctivate.bat" (
 )
 
 echo [INFO] Dang kich hoat moi truong ao .venv...
-call .venv\Scriptsctivate.bat
+call .venv\Scripts\activate.bat
 
 echo [INFO] Khoi chay Document Crawler...
 python crawl.py -i
