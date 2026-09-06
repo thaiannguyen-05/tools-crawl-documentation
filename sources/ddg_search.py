@@ -21,6 +21,11 @@ class SearchCandidate(TypedDict):
     source: str
 
 
+import time
+
+_ddg_cooldown_until: float = 0.0
+
+
 def search_ddg_files(
     query: str,
     file_format: str,
@@ -31,6 +36,11 @@ def search_ddg_files(
     
     file_format can be: 'pdf', 'docx', 'doc', 'txt', 'md'.
     """
+    global _ddg_cooldown_until
+    if time.time() < _ddg_cooldown_until:
+        logger.debug("DDG is in cooldown period (rate-limited), skipping query.")
+        return []
+
     search_query = f"{query} filetype:{file_format}"
     endpoint = "https://html.duckduckgo.com/html/"
 
@@ -52,6 +62,15 @@ def search_ddg_files(
             timeout=timeout,
             follow_redirects=True,
         )
+
+        if response.status_code in (202, 403, 429):
+            _ddg_cooldown_until = time.time() + 45.0
+            logger.warning(
+                "DDG search rate limited (HTTP %d). Entering 45s cooldown for query '%s'",
+                response.status_code,
+                search_query,
+            )
+            return candidates
 
         if response.status_code != 200:
             logger.warning(

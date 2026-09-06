@@ -21,6 +21,9 @@ from sources.ddg_search import search_ddg_files
 from sources.github_source import search_github_markdown
 from sources.wiki_source import search_wiki_articles
 
+import csv
+from collections.abc import Callable
+
 logger = logging.getLogger("doc_crawler")
 
 
@@ -30,13 +33,73 @@ def setup_logging(verbose: bool = False) -> None:
     logging.basicConfig(level=level, format=format_str, datefmt="%H:%M:%S")
 
 
+def _handle_document_record(
+    res: dict,
+    topic_dir: Path,
+    topic_slug: str,
+    encode_fn: Callable[[str], list[float]] | None,
+    output_csv_path: Path | None,
+    delete_raw: bool,
+    downloaded_items: list[dict],
+    target_records: int,
+) -> bool:
+    """Process a downloaded file into a vector, append to CSV, and delete raw file if requested."""
+    file_path = topic_dir / res["file_name"]
+
+    if encode_fn is not None and output_csv_path is not None:
+        from processor import process_file_to_vector
+
+        vec_info = process_file_to_vector(file_path, encode_fn=encode_fn, method="mean")
+        if vec_info:
+            output_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            write_header = not output_csv_path.exists() or output_csv_path.stat().st_size == 0
+            with open(output_csv_path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if write_header:
+                    writer.writerow(["vector", "label", "file_name"])
+                writer.writerow([json.dumps(vec_info["vector"]), topic_slug, vec_info["file_name"]])
+                f.flush()
+
+            if delete_raw:
+                file_path.unlink(missing_ok=True)
+                companion = file_path.with_suffix(".extracted.txt")
+                companion.unlink(missing_ok=True)
+                print(
+                    f"   ✅ [VECTƠ HOÁ & ĐÃ XÓA FILE THÔ] {res['file_name']} -> {vec_info['chunk_count']} chunks "
+                    f"({vec_info['vector_dim']}-dim) -> Lưu CSV [{len(downloaded_items) + 1}/{target_records}]"
+                )
+            else:
+                print(
+                    f"   ✅ [VECTƠ HOÁ] {res['file_name']} -> {vec_info['chunk_count']} chunks "
+                    f"({vec_info['vector_dim']}-dim) -> Lưu CSV [{len(downloaded_items) + 1}/{target_records}]"
+                )
+
+            downloaded_items.append(res)
+            return True
+        else:
+            if delete_raw:
+                file_path.unlink(missing_ok=True)
+                companion = file_path.with_suffix(".extracted.txt")
+                companion.unlink(missing_ok=True)
+            print(f"   ⚠️ [BỎ QUA & ĐÃ XÓA FILE HỎNG] {res['file_name']}")
+            return False
+    else:
+        converted_info = f" -> Converted: {Path(res['converted_file']).name}" if res.get("converted_file") else ""
+        print(f"   ✅ [{res.get('format', 'FILE').upper()}] {res['file_name']} ({res['size']:,} bytes){converted_info} - [{len(downloaded_items) + 1}/{target_records}]")
+        downloaded_items.append(res)
+        return True
+
+
 def crawl_single_topic(
     topic_key_or_name: str,
     formats: list[str],
     target_records: int,
     output_base_dir: Path,
+    encode_fn: Callable[[str], list[float]] | None = None,
+    output_csv_path: Path | None = None,
+    delete_raw: bool = False,
 ) -> dict:
-    """Crawl documents for a single topic with exact target records limit."""
+    """Crawl documents for a single topic with exact target records limit and optional streaming vectorization."""
     if topic_key_or_name in FAMOUS_TOPICS:
         topic_def = FAMOUS_TOPICS[topic_key_or_name]
         topic_slug = topic_def.key
@@ -54,8 +117,9 @@ def crawl_single_topic(
     topic_dir = output_base_dir / topic_slug
     topic_dir.mkdir(parents=True, exist_ok=True)
 
+    mode_note = " (Chế độ xử lý trực tiếp & Xóa file thô)" if (encode_fn and delete_raw) else ""
     print(f"\n=======================================================")
-    print(f"🎯 Chủ đề: {topic_display}")
+    print(f"🎯 Chủ đề: {topic_display}{mode_note}")
     print(f"📊 Mục tiêu: {target_records} bản ghi")
     print(f"📁 Thư mục lưu trữ: {topic_dir}")
     print(f"📄 Các định dạng: {', '.join(formats)}")
@@ -73,6 +137,17 @@ def crawl_single_topic(
         except Exception:
             pass
 
+    # Read already saved filenames from CSV to avoid duplicates
+    if output_csv_path and output_csv_path.exists():
+        try:
+            with open(output_csv_path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get("label") == topic_slug:
+                        seen_urls.add(row.get("file_name", ""))
+        except Exception:
+            pass
+
     # Calculate target quota per format
     base_per_format = max(1, math.ceil(target_records / max(len(formats), 1)))
 
@@ -81,7 +156,6 @@ def crawl_single_topic(
             break
 
         fmt_clean = fmt.lower().lstrip(".")
-        # Calculate remaining quota needed
         remaining_needed = target_records - len(downloaded_items)
         quota_for_this_format = min(base_per_format, remaining_needed)
 
@@ -109,10 +183,12 @@ def crawl_single_topic(
                     )
                     if res:
                         seen_urls.add(url)
-                        downloaded_items.append(res)
-                        downloaded_for_fmt += 1
-                        print(f"   ✅ [MD] {res['file_name']} ({res['size']:,} bytes) - [{len(downloaded_items)}/{target_records}]")
-                        time.sleep(0.4)
+                        if _handle_document_record(
+                            res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                            delete_raw, downloaded_items, target_records
+                        ):
+                            downloaded_for_fmt += 1
+                        time.sleep(0.3)
 
         # 2. Special handler for Plain Text (.txt) via Wikipedia
         if fmt_clean == "txt":
@@ -136,10 +212,12 @@ def crawl_single_topic(
                     )
                     if res:
                         seen_urls.add(url)
-                        downloaded_items.append(res)
-                        downloaded_for_fmt += 1
-                        print(f"   ✅ [TXT] {res['file_name']} ({res['size']:,} bytes) - [{len(downloaded_items)}/{target_records}]")
-                        time.sleep(0.4)
+                        if _handle_document_record(
+                            res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                            delete_raw, downloaded_items, target_records
+                        ):
+                            downloaded_for_fmt += 1
+                        time.sleep(0.3)
 
         # 3. DuckDuckGo search for PDF, DOCX, DOC and others
         for term in search_terms:
@@ -161,11 +239,12 @@ def crawl_single_topic(
                 )
                 if res:
                     seen_urls.add(url)
-                    downloaded_items.append(res)
-                    downloaded_for_fmt += 1
-                    converted_info = f" -> Converted: {Path(res['converted_file']).name}" if res.get("converted_file") else ""
-                    print(f"   ✅ [{fmt_clean.upper()}] {res['file_name']} ({res['size']:,} bytes){converted_info} - [{len(downloaded_items)}/{target_records}]")
-                    time.sleep(0.5)
+                    if _handle_document_record(
+                        res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                        delete_raw, downloaded_items, target_records
+                    ):
+                        downloaded_for_fmt += 1
+                    time.sleep(0.4)
 
         # 4. Fallback to curated seeds if format is still below quota
         if downloaded_for_fmt < quota_for_this_format and len(downloaded_items) < target_records:
@@ -185,27 +264,98 @@ def crawl_single_topic(
                     )
                     if res:
                         seen_urls.add(seed_url)
-                        downloaded_items.append(res)
-                        downloaded_for_fmt += 1
-                        converted_info = f" -> Converted: {Path(res['converted_file']).name}" if res.get("converted_file") else ""
-                        print(f"   ✅ [CURATED {fmt_clean.upper()}] {res['file_name']} ({res['size']:,} bytes){converted_info} - [{len(downloaded_items)}/{target_records}]")
-                        time.sleep(0.4)
+                        if _handle_document_record(
+                            res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                            delete_raw, downloaded_items, target_records
+                        ):
+                            downloaded_for_fmt += 1
+                        time.sleep(0.3)
 
         print(f"   📊 Định dạng .{fmt_clean}: hoàn thành {downloaded_for_fmt} bản ghi (Tổng tích lũy: {len(downloaded_items)}/{target_records})")
 
-    # Save manifest.json
-    manifest_data = {
+    # 5. Catch-up loop: If still below target_records, fulfill remainder using Wikipedia (.txt) and DuckDuckGo (.pdf)
+    if len(downloaded_items) < target_records:
+        shortfall = target_records - len(downloaded_items)
+        print(f"\n🔄 [BỔ SUNG CHỈ TIÊU] Đang tìm kiếm thêm {shortfall} bản ghi từ Wikipedia và PDF...")
+
+        for term in wiki_terms:
+            if len(downloaded_items) >= target_records:
+                break
+            wiki_more = search_wiki_articles(term, max_results=min(100, target_records - len(downloaded_items)))
+            for cand in wiki_more:
+                if len(downloaded_items) >= target_records:
+                    break
+                url = cand["url"]
+                if url in seen_urls:
+                    continue
+                res = download_document(
+                    url=url,
+                    output_dir=topic_dir,
+                    file_format="txt",
+                    title=cand["title"],
+                    direct_content=cand.get("direct_content"),
+                )
+                if res:
+                    seen_urls.add(url)
+                    _handle_document_record(
+                        res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                        delete_raw, downloaded_items, target_records
+                    )
+                    time.sleep(0.2)
+
+        for term in search_terms:
+            if len(downloaded_items) >= target_records:
+                break
+            ddg_more = search_ddg_files(term, file_format="pdf", max_results=min(50, target_records - len(downloaded_items)))
+            for cand in ddg_more:
+                if len(downloaded_items) >= target_records:
+                    break
+                url = cand["url"]
+                if url in seen_urls:
+                    continue
+                res = download_document(
+                    url=url,
+                    output_dir=topic_dir,
+                    file_format="pdf",
+                    title=cand["title"],
+                )
+                if res:
+                    seen_urls.add(url)
+                    _handle_document_record(
+                        res, topic_dir, topic_slug, encode_fn, output_csv_path,
+                        delete_raw, downloaded_items, target_records
+                    )
+                    time.sleep(0.3)
+
+    # Clean up directory if delete_raw is requested
+    if delete_raw:
+        manifest_path.unlink(missing_ok=True)
+        # Remove any stray files left in topic_dir
+        for f in topic_dir.iterdir():
+            if f.is_file():
+                f.unlink(missing_ok=True)
+        try:
+            topic_dir.rmdir()
+        except OSError:
+            pass
+        print(f"🧹 Đã dọn dẹp thư mục tạm và xóa sạch file thô của chủ đề [{topic_slug}]")
+    else:
+        manifest_data = {
+            "topic_key": topic_slug,
+            "topic_name": topic_display,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "total_documents": len(downloaded_items),
+            "target_requested": target_records,
+            "documents": downloaded_items,
+        }
+        manifest_path.write_text(json.dumps(manifest_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\n💾 Đã cập nhật danh mục ({len(downloaded_items)} bản ghi) vào: {manifest_path}")
+
+    return {
         "topic_key": topic_slug,
-        "topic_name": topic_display,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
         "total_documents": len(downloaded_items),
         "target_requested": target_records,
-        "documents": downloaded_items,
     }
-    manifest_path.write_text(json.dumps(manifest_data, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\n💾 Đã cập nhật danh mục ({len(downloaded_items)} bản ghi) vào: {manifest_path}")
-
-    return manifest_data
 
 
 def prompt_int(prompt: str, default: int, min_val: int = 1) -> int:
@@ -288,7 +438,14 @@ def interactive_cli(output_base_dir: Path) -> None:
             count = prompt_int(f"👉 Số lượng bản ghi cho '{name}'", default=5)
             topic_counts[key] = count
 
-        _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir)
+        ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]: ").strip().lower()
+        auto_proc = ask_proc in ("", "y", "yes")
+        del_raw = False
+        if auto_proc:
+            ask_del = input("👉 Bạn có muốn tự động XÓA FILE THÔ sau khi xử lý (chỉ để lại training_data.csv)? [Y/n]: ").strip().lower()
+            del_raw = ask_del in ("", "y", "yes")
+
+        _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir, auto_process=auto_proc, delete_raw=del_raw)
 
     # Mode 2: Crawl all 5 famous topics
     elif choice == "2":
@@ -305,7 +462,14 @@ def interactive_cli(output_base_dir: Path) -> None:
             for key in topics_keys:
                 topic_counts[key] = default_all
 
-        _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir)
+        ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]: ").strip().lower()
+        auto_proc = ask_proc in ("", "y", "yes")
+        del_raw = False
+        if auto_proc:
+            ask_del = input("👉 Bạn có muốn tự động XÓA FILE THÔ sau khi xử lý (chỉ để lại training_data.csv)? [Y/n]: ").strip().lower()
+            del_raw = ask_del in ("", "y", "yes")
+
+        _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir, auto_process=auto_proc, delete_raw=del_raw)
 
     # Mode 3: Custom topic
     elif choice == "3":
@@ -314,22 +478,16 @@ def interactive_cli(output_base_dir: Path) -> None:
             print("⚠️ Tên chủ đề không được để trống.")
             return
         count = prompt_int(f"👉 Số lượng bản ghi cần crawl cho '{custom_topic}'", default=5)
-        crawl_single_topic(
-            topic_key_or_name=custom_topic,
-            formats=SUPPORTED_FORMATS,
-            target_records=count,
-            output_base_dir=output_base_dir,
-        )
+        
+        ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]: ").strip().lower()
+        auto_proc = ask_proc in ("", "y", "yes")
+        del_raw = False
+        if auto_proc:
+            ask_del = input("👉 Bạn có muốn tự động XÓA FILE THÔ sau khi xử lý (chỉ để lại training_data.csv)? [Y/n]: ").strip().lower()
+            del_raw = ask_del in ("", "y", "yes")
 
-    # Prompt to run pipeline
-    ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]: ").strip().lower()
-    if ask_proc in ("", "y", "yes"):
-        from processor import generate_training_data
-        generate_training_data(
-            input_dir=output_base_dir,
-            output_pickle_path=output_base_dir / "training_data.pkl",
-            method="mean",
-        )
+        topic_counts = {custom_topic: count}
+        _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir, auto_process=auto_proc, delete_raw=del_raw)
 
 
 def _execute_crawl_batch(
@@ -337,8 +495,24 @@ def _execute_crawl_batch(
     formats: list[str],
     output_base_dir: Path,
     auto_process: bool = False,
+    delete_raw: bool = False,
+    fast_test: bool = False,
+    output_csv_path: Path | None = None,
 ) -> None:
-    """Execute crawling for a mapping of topic -> target_records."""
+    """Execute crawling for a mapping of topic -> target_records with optional streaming vectorization."""
+    if output_csv_path is None:
+        output_csv_path = output_base_dir / "training_data.csv"
+
+    # If delete_raw is requested, auto_process must be True
+    if delete_raw:
+        auto_process = True
+
+    encode_fn = None
+    if auto_process:
+        from processor import get_encode_fn
+        print("\n⚙️ Đang khởi tạo mô hình vector hoá (PhoBERT)...")
+        encode_fn = get_encode_fn(fast_test=fast_test)
+
     print("\n🚀 BẮT ĐẦU TIẾN TRÌNH CRAWL...")
     summary = {}
     total_requested = sum(topic_counts.values())
@@ -350,31 +524,41 @@ def _execute_crawl_batch(
             formats=formats,
             target_records=count,
             output_base_dir=output_base_dir,
+            encode_fn=encode_fn,
+            output_csv_path=output_csv_path,
+            delete_raw=delete_raw,
         )
         downloaded = res["total_documents"]
         summary[key] = (downloaded, count)
         total_downloaded += downloaded
-        time.sleep(0.5)
+        time.sleep(0.3)
+
+    # Clean up empty directories in output_base_dir if delete_raw is set
+    if delete_raw:
+        for sub_dir in output_base_dir.iterdir():
+            if sub_dir.is_dir():
+                try:
+                    # Remove any empty subdirectories
+                    sub_dir.rmdir()
+                except OSError:
+                    pass
 
     print("\n" + "=" * 65)
-    print("🎉 HOÀN TẤT TIẾN TRÌNH CRAWL!")
+    print("🎉 HOÀN TẤT TIẾN TRÌNH CRAWL & VECTOR HOÁ!")
     print("=" * 65)
     for key, (done, target) in summary.items():
         name = FAMOUS_TOPICS[key].name if key in FAMOUS_TOPICS else key
         status_mark = "✅" if done >= target else "⚠️"
         print(f"  {status_mark} {name}: {done}/{target} bản ghi")
 
-    print(f"\n📊 Tổng cộng đã tải: {total_downloaded}/{total_requested} bản ghi")
-    print(f"📁 Dữ liệu được lưu tại: {output_base_dir}")
-
-    if auto_process:
-        print("\n⚙️ Đang kích hoạt pipeline xử lý vector và tạo training_data.csv...")
-        from processor import generate_training_data
-        generate_training_data(
-            input_dir=output_base_dir,
-            output_pickle_path=output_base_dir / "training_data.pkl",
-            method="mean",
-        )
+    print(f"\n📊 Tổng cộng đã hoàn thành: {total_downloaded}/{total_requested} bản ghi")
+    if delete_raw:
+        print("🧹 Tất cả file tài liệu thô đã được xóa sạch sau khi vector hóa.")
+        print(f"💾 File Training Data duy nhất được lưu tại: {output_csv_path}")
+    else:
+        print(f"📁 Dữ liệu tài liệu được lưu tại: {output_base_dir}")
+        if auto_process:
+            print(f"💾 File Training Data CSV: {output_csv_path}")
 
 
 def parse_topic_counts_arg(arg_str: str) -> dict[str, int]:
@@ -436,6 +620,12 @@ def main() -> None:
         help="Thư mục gốc lưu trữ dữ liệu tải về (Mặc định: ./output).",
     )
     parser.add_argument(
+        "--output-csv",
+        type=str,
+        default=None,
+        help="Đường dẫn file CSV xuất dữ liệu huấn luyện (Mặc định: <output-dir>/training_data.csv).",
+    )
+    parser.add_argument(
         "--list-topics",
         action="store_true",
         help="Hiển thị danh sách 5 chủ đề nổi tiếng có sẵn.",
@@ -444,7 +634,17 @@ def main() -> None:
         "--process",
         "-p",
         action="store_true",
-        help="Tự động chạy pipeline RAG xử lý vector và xuất training_data.pkl ngay sau khi crawl xong.",
+        help="Tự động chạy pipeline RAG xử lý vector và xuất training_data.csv ngay khi crawl.",
+    )
+    parser.add_argument(
+        "--delete-raw",
+        action="store_true",
+        help="Xóa tệp thô ngay sau khi xử lý vector xong, chỉ để lại file CSV đầu ra để tiết kiệm ổ cứng.",
+    )
+    parser.add_argument(
+        "--fast-test",
+        action="store_true",
+        help="Dùng mock encoder để kiểm thử quy trình nhanh mà không cần tải mô hình PhoBERT.",
     )
     parser.add_argument(
         "-v",
@@ -456,6 +656,9 @@ def main() -> None:
     args = parser.parse_args()
     setup_logging(args.verbose)
     output_base_dir = Path(args.output_dir)
+    output_csv_path = Path(args.output_csv) if args.output_csv else output_base_dir / "training_data.csv"
+    delete_raw = args.delete_raw
+    auto_process = args.process or delete_raw
 
     # 1. List topics flag
     if args.list_topics:
@@ -473,32 +676,33 @@ def main() -> None:
         if not counts:
             print("⚠️ Tham số --topic-counts không hợp lệ. Ví dụ: --topic-counts 'ai_tech=10,economy_finance=5'")
             sys.exit(1)
-        _execute_crawl_batch(counts, args.formats, output_base_dir, auto_process=args.process)
+        _execute_crawl_batch(
+            counts, args.formats, output_base_dir,
+            auto_process=auto_process, delete_raw=delete_raw,
+            fast_test=args.fast_test, output_csv_path=output_csv_path,
+        )
         sys.exit(0)
 
     # 3. Crawl 5 famous with specific count
     if args.crawl_5_famous:
         target = args.count if args.count is not None else 5
         counts = {key: target for key in FAMOUS_TOPICS}
-        _execute_crawl_batch(counts, args.formats, output_base_dir, auto_process=args.process)
+        _execute_crawl_batch(
+            counts, args.formats, output_base_dir,
+            auto_process=auto_process, delete_raw=delete_raw,
+            fast_test=args.fast_test, output_csv_path=output_csv_path,
+        )
         sys.exit(0)
 
     # 4. Single topic with count
     if args.topic:
         target = args.count if args.count is not None else 5
-        crawl_single_topic(
-            topic_key_or_name=args.topic,
-            formats=args.formats,
-            target_records=target,
-            output_base_dir=output_base_dir,
+        counts = {args.topic: target}
+        _execute_crawl_batch(
+            counts, args.formats, output_base_dir,
+            auto_process=auto_process, delete_raw=delete_raw,
+            fast_test=args.fast_test, output_csv_path=output_csv_path,
         )
-        if args.process:
-            from processor import generate_training_data
-            generate_training_data(
-                input_dir=output_base_dir,
-                output_pickle_path=output_base_dir / "training_data.pkl",
-                method="mean",
-            )
         sys.exit(0)
 
     # 5. Default: Interactive CLI Wizard

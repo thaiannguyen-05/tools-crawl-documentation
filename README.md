@@ -108,22 +108,38 @@ Chọn chế độ hoạt động:
 
 ### ⚡ Chế độ 2: Dòng lệnh CLI Flags (Tự động hóa)
 
-#### 1. Vừa crawl vừa chạy Pipeline xuất luôn file `training_data.csv` (`--process` hoặc `-p`)
+#### 1. Thu thập số lượng lớn & Tự động XÓA FILE THÔ (`--delete-raw`)
+> [!TIP]
+> **Khuyên dùng khi crawl số lượng lớn (ví dụ 1,000 file/chủ đề)**:
+> Khi bật `--delete-raw`, chương trình sẽ hoạt động theo cơ chế **Streaming**:
+> `Tải 1 file` ➔ `Chạy PhoBERT vector hoá` ➔ `Ghi ngay 1 dòng vào training_data.csv` ➔ `XÓA NGAY file thô đó`.
+> Ổ cứng của bạn sẽ không bao giờ bị đầy, và kết quả cuối cùng **chỉ còn duy nhất file `training_data.csv`**!
+
 ```bash
-# Crawl 5 chủ đề, mỗi chủ đề lấy 5 bản ghi và xuất training_data.csv:
+# Crawl toàn bộ 5 chủ đề, mỗi chủ đề 1,000 bản ghi và xóa file thô ngay sau khi vector hóa:
+python crawl.py --crawl-5-famous --count 1000 --delete-raw
+
+# Hoặc chỉ crawl 1 chủ đề 1,000 bản ghi:
+python crawl.py --topic ai_tech --count 1000 --delete-raw
+```
+
+---
+
+#### 2. Vừa crawl vừa chạy Pipeline nhưng VẪN GIỮ LẠI FILE GỐC (`--process` hoặc `-p`)
+```bash
+# Crawl 5 chủ đề, mỗi chủ đề lấy 5 bản ghi và xuất training_data.csv (vẫn lưu lại file PDF, DOCX):
 python crawl.py --crawl-5-famous --count 5 --process
 
 # Đặt số lượng bản ghi riêng biệt cho từng chủ đề:
 python crawl.py --topic-counts "ai_tech=10,economy_finance=5,health_medicine=8" --process
-
-# Chỉ crawl 1 chủ đề với 12 bản ghi:
-python crawl.py --topic ai_tech --count 12 --process
 ```
 
-#### 2. Chỉ crawl tài liệu về máy (không chạy vector hóa)
+---
+
+#### 3. Chỉ crawl tài liệu về máy (không chạy vector hóa)
 ```bash
-# Crawl 5 chủ đề, mỗi chủ đề 3 bản ghi:
-python crawl.py --crawl-5-famous --count 3
+# Crawl 5 chủ đề, mỗi chủ đề 5 bản ghi:
+python crawl.py --crawl-5-famous --count 5
 
 # Crawl theo từ khóa bất kỳ:
 python crawl.py --topic "Năng lượng mặt trời và pin lithium" --count 5
