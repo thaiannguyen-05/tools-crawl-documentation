@@ -322,7 +322,7 @@ def interactive_cli(output_base_dir: Path) -> None:
         )
 
     # Prompt to run pipeline
-    ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.pkl ngay bây giờ? [Y/n]: ").strip().lower()
+    ask_proc = input("\n👉 Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]: ").strip().lower()
     if ask_proc in ("", "y", "yes"):
         from processor import generate_training_data
         generate_training_data(
@@ -368,7 +368,7 @@ def _execute_crawl_batch(
     print(f"📁 Dữ liệu được lưu tại: {output_base_dir}")
 
     if auto_process:
-        print("\n⚙️ Đang kích hoạt pipeline xử lý vector và tạo training_data.pkl...")
+        print("\n⚙️ Đang kích hoạt pipeline xử lý vector và tạo training_data.csv...")
         from processor import generate_training_data
         generate_training_data(
             input_dir=output_base_dir,

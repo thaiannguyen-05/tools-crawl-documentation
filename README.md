@@ -40,32 +40,24 @@ Bộ công cụ độc lập (standalone) chạy trên CLI dùng để:
 
 ---
 
-## 🚀 Cài Đặt Nhanh (1 Lệnh Tự Động)
+## 🚀 Cài Đặt Nhanh Trên Windows
 
-Yêu cầu hệ thống: **Python 3.10+**
+Yêu cầu hệ thống: **Python 3.10+** (Lưu ý tick chọn *"Add Python to PATH"* khi cài đặt Python).
 
-### Cách 1: Chạy script tự động (Khuyên dùng)
-Script sẽ tự động kiểm tra Python, tạo môi trường ảo `.venv`, nâng cấp `pip`, cài đặt toàn bộ dependencies và chạy healthcheck:
-
-- **Trên Linux / macOS:**
-  ```bash
-  chmod +x install.sh
-  ./install.sh
-  ```
-- **Trên Windows:**
-  ```cmd
-  install.bat
-  ```
+### Cách 1: Chạy file tự động (Khuyên dùng trên Windows)
+- **Cài đặt thư viện:** Click đúp vào file **`install.bat`** (hoặc mở cmd chạy `install.bat`).
+  File sẽ tự động kiểm tra Python, tạo môi trường ảo `.venv`, nâng cấp `pip`, cài đặt toàn bộ dependencies trong `requirements.txt` và chạy healthcheck kiểm tra thư viện.
+- **Khởi chạy nhanh:** Click đúp vào file **`run.bat`** để bật giao diện crawl ngay lập tức!
 
 ---
 
-### Cách 2: Cài đặt thủ công bằng `pip`
-```bash
-# 1. Tạo và kích hoạt môi trường ảo
-python3 -m venv .venv
-source .venv/bin/activate    # Trên Windows: .venv\Scripts\activate
+### Cách 2: Cài đặt thủ công qua dòng lệnh Command Prompt / PowerShell
+```cmd
+:: 1. Tạo và kích hoạt môi trường ảo
+python -m venv .venv
+.venv\Scripts\activate
 
-# 2. Cài đặt toàn bộ dependencies
+:: 2. Cài đặt toàn bộ dependencies
 pip install -r requirements.txt
 ```
 
