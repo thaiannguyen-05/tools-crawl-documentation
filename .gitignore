@@ -1,1 +1,10 @@
 output/
+downloads/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.DS_Store
+.venv/
+env/
