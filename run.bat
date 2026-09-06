@@ -2,20 +2,25 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-if not exist ".venv\Scripts\activate.bat" (
-    echo [THÔNG BÁO] Chưa tìm thấy môi trường ảo .venv. Đang tiến hành cài đặt...
+if not exist ".venv\Scriptsctivate.bat" (
+    echo =================================================================
+    echo [THONG BAO] Chua thay thu muc .venv. Dang chuyen sang cai dat...
+    echo =================================================================
     call install.bat
     if %ERRORLEVEL% NEQ 0 (
-        echo [LỖI] Cài đặt thất bại.
+        echo [LOI] Cai dat khong thanh cong.
         pause
         exit /b %ERRORLEVEL%
     )
 )
 
-call .venv\Scripts\activate.bat
+echo [INFO] Dang kich hoat moi truong ao .venv...
+call .venv\Scriptsctivate.bat
+
+echo [INFO] Khoi chay Document Crawler...
 python crawl.py -i
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo Chương trình kết thúc với lỗi.
+    echo [THONG BAO] Chuong trinh da ket thuc voi ma loi: %ERRORLEVEL%
     pause
 )
