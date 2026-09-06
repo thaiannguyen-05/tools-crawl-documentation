@@ -40,21 +40,32 @@ Bộ công cụ độc lập (standalone) chạy trên CLI dùng để:
 
 ---
 
-## 🚀 Cài Đặt Môi Trường
+## 🚀 Cài Đặt Nhanh (1 Lệnh Tự Động)
 
-Yêu cầu: **Python 3.10+**
+Yêu cầu hệ thống: **Python 3.10+**
 
+### Cách 1: Chạy script tự động (Khuyên dùng)
+Script sẽ tự động kiểm tra Python, tạo môi trường ảo `.venv`, nâng cấp `pip`, cài đặt toàn bộ dependencies và chạy healthcheck:
+
+- **Trên Linux / macOS:**
+  ```bash
+  chmod +x install.sh
+  ./install.sh
+  ```
+- **Trên Windows:**
+  ```cmd
+  install.bat
+  ```
+
+---
+
+### Cách 2: Cài đặt thủ công bằng `pip`
 ```bash
-# 1. Tạo môi trường ảo (Khuyên dùng)
-python3 -m venv venv
+# 1. Tạo và kích hoạt môi trường ảo
+python3 -m venv .venv
+source .venv/bin/activate    # Trên Windows: .venv\Scripts\activate
 
-# Kích hoạt môi trường ảo:
-# Trên Linux/macOS:
-source venv/bin/activate
-# Trên Windows:
-venv\Scripts\activate
-
-# 2. Cài đặt các thư viện cần thiết
+# 2. Cài đặt toàn bộ dependencies
 pip install -r requirements.txt
 ```
 
