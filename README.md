@@ -101,6 +101,7 @@ Chọn chế độ hoạt động:
   * 👉 *Số lượng bản ghi cho 'Trí tuệ nhân tạo & CNTT':* `10`
   * 👉 *Số lượng bản ghi cho 'Kinh tế & Tài chính':* `5`
 * **Chọn `[2]`**: Tải cả 5 chủ đề với số lượng chung (ví dụ: mỗi chủ đề 5 bản ghi) hoặc tùy chỉnh số lượng từng chủ đề.
+* **Chọn `[4]`**: Đã có sẵn folder chứa file → chỉ cần nhập **vị trí folder gốc**, tool tự vào từng folder con (mỗi folder = 1 label, kể cả folder lồng nhau), vector hoá và **gom vào cùng 1 file `training_data.csv`** như bình thường (tự bỏ qua file trùng).
 * Sau khi crawl xong, chương trình sẽ tự động hỏi:
   * 👉 *Bạn có muốn chạy Pipeline xử lý vector và xuất training_data.csv ngay bây giờ? [Y/n]:* ➔ Bấm `Enter` để chạy luôn!
 
@@ -175,6 +176,46 @@ python processor.py --fast-test
 
 ---
 
+### 📂 Chế độ 4: Đã có sẵn folder chứa file → chỉ cần chỉ vị trí, tự quét & gom CSV
+
+Khi bạn đã tự chuẩn bị sẵn các folder chứa file (không cần crawl), mỗi **folder con cấp 1 = 1 label**.
+Chỉ cần cung cấp **vị trí folder gốc**, tool tự vào từng folder (kể cả folder lồng nhau),
+vector hoá từng file và **gom vào cùng một file `training_data.csv`**, đánh label như bình thường.
+Chạy lại nhiều lần sẽ **giữ dòng cũ, chỉ thêm file mới** (chống trùng theo `label + file_name`).
+
+Cấu trúc folder đúng:
+```text
+./my_data/
+    ai_tech/            -> Label 'ai_tech'
+        a.pdf
+        sub1/b.docx     (folder lồng nhau vẫn quét được)
+    kinh_te/            -> Label 'kinh_te'
+        c.txt
+```
+
+```bash
+# Cách nhanh qua crawl.py (khuyên dùng):
+python crawl.py --from-folders ./my_data --output-dir ./output
+
+# Chỉ rõ file CSV gom chung:
+python crawl.py --from-folders D:/du_lieu --output-csv ./output/training_data.csv
+
+# Hoặc chạy trực tiếp processor.py:
+python processor.py --input-dir ./my_data --output-file ./output/training_data.pkl
+python processor.py --source-dir ./my_data --output-csv ./output/training_data.csv --fast-test
+
+# Ghi mới hoàn toàn (mặc định là gom tiếp):
+python crawl.py --from-folders ./my_data --no-append
+
+# Chỉ quét file ngay trong folder label, bỏ qua folder lồng nhau:
+python crawl.py --from-folders ./my_data --no-recursive
+```
+
+Trong menu tương tác (`python crawl.py -i`) chọn **`[4]`** rồi nhập vị trí folder gốc
+và file CSV đích là xong.
+
+---
+
 ## 📊 Định Dạng Dữ Liệu Huấn Luyện (Training Data Output)
 
 ### 1. File CSV: `output/training_data.csv`
@@ -236,5 +277,9 @@ Toàn bộ file **`output/training_data.csv`** (hoặc `training_data.pkl`) đư
 | `--process` | `-p` | Tự động chạy Pipeline tạo `training_data.csv` | `python crawl.py --crawl-5-famous -c 5 -p` |
 | `--formats` | | Giới hạn các định dạng cần tải | `python crawl.py --formats pdf docx txt` |
 | `--output-dir` | | Thư mục lưu dữ liệu xuất ra | `python crawl.py --output-dir ./output` |
+| `--from-folders` | | Folder có sẵn: chỉ cần vị trí gốc, tự quét & gom CSV | `python crawl.py --from-folders ./my_data` |
+| `--method` | | Aggregate khi dùng `--from-folders` (`mean`,`max`,`weighted`) | `python crawl.py --from-folders ./my_data --method mean` |
+| `--no-append` | | Ghi mới CSV thay vì gom tiếp | `python crawl.py --from-folders ./my_data --no-append` |
+| `--no-recursive` | | Không quét folder lồng nhau | `python crawl.py --from-folders ./my_data --no-recursive` |
 | `--list-topics` | | Xem danh sách 5 chủ đề mẫu | `python crawl.py --list-topics` |
 | `--verbose` | `-v` | Bật log debug chi tiết | `python crawl.py -v` |

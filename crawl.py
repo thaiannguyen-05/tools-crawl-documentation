@@ -389,10 +389,11 @@ def interactive_cli(output_base_dir: Path) -> None:
     print("  [1] Chọn từng chủ đề cụ thể và nhập số lượng bản ghi riêng")
     print("  [2] Crawl toàn bộ 5 chủ đề nổi tiếng (Nhập số lượng cho mỗi chủ đề)")
     print("  [3] Nhập một chủ đề tùy chỉnh mới")
+    print("  [4] Đã có sẵn folder chứa file -> nhập vị trí, tự quét & gom ra training_data.csv")
     print("  [0] Thoát")
     print("-" * 65)
 
-    choice = input("👉 Nhập lựa chọn của bạn (0-3): ").strip()
+    choice = input("👉 Nhập lựa chọn của bạn (0-4): ").strip()
     if choice == "0":
         print("Tạm biệt!")
         sys.exit(0)
@@ -488,6 +489,54 @@ def interactive_cli(output_base_dir: Path) -> None:
 
         topic_counts = {custom_topic: count}
         _execute_crawl_batch(topic_counts, SUPPORTED_FORMATS, output_base_dir, auto_process=auto_proc, delete_raw=del_raw)
+
+    # Mode 4: Đã có sẵn folder chứa file -> chỉ cần nhập vị trí, tự quét & gom CSV
+    elif choice == "4":
+        print("\n--- Xử lý folder có sẵn (mỗi folder con = 1 label) ---")
+        print("   Ví dụ cấu trúc đúng:")
+        print("     D:/du_lieu/ai_tech/a.pdf")
+        print("     D:/du_lieu/kinh_te/b.docx")
+        raw_src = input("👉 Nhập vị trí folder gốc chứa các folder (Mặc định: ./output): ").strip()
+        source_dir = Path(raw_src) if raw_src else output_base_dir
+        raw_csv = input(f"👉 File CSV gom chung [Mặc định: {output_base_dir / 'training_data.csv'}]: ").strip()
+        output_csv = Path(raw_csv) if raw_csv else (output_base_dir / "training_data.csv")
+        ask_append = input("👉 Gom tiếp vào CSV cũ nếu có? (giữ dòng cũ, bỏ qua file trùng) [Y/n]: ").strip().lower()
+        use_append = ask_append in ("", "y", "yes")
+        ask_rec = input("👉 Quét cả folder lồng nhau bên trong? [Y/n]: ").strip().lower()
+        use_recursive = ask_rec in ("", "y", "yes")
+        _execute_local_folders(source_dir, output_csv, append=use_append, recursive=use_recursive)
+
+    else:
+        print("⚠️ Lựa chọn không hợp lệ.")
+
+
+def _execute_local_folders(
+    source_dir: Path,
+    output_csv_path: Path,
+    method: str = "mean",
+    fast_test: bool = False,
+    append: bool = True,
+    recursive: bool = True,
+) -> None:
+    """Vector hoá các folder có sẵn: mỗi folder con = 1 label, gom vào cùng 1 CSV."""
+    from processor import generate_training_data
+
+    if not source_dir.exists() or not source_dir.is_dir():
+        print(f"⚠️ Không tìm thấy thư mục nguồn: {source_dir}")
+        return
+    output_pickle_path = output_csv_path.with_suffix(".pkl")
+    print("\n🚀 BẮT ĐẦU XỬ LÝ FOLDER CÓ SẴN...")
+    print(f"📁 Vị trí folder gốc: {source_dir}")
+    print(f"💾 File CSV gom chung: {output_csv_path}")
+    generate_training_data(
+        input_dir=source_dir,
+        output_pickle_path=output_pickle_path,
+        method=method,
+        fast_test=fast_test,
+        output_csv_path=output_csv_path,
+        append=append,
+        recursive=recursive,
+    )
 
 
 def _execute_crawl_batch(
@@ -647,6 +696,29 @@ def main() -> None:
         help="Dùng mock encoder để kiểm thử quy trình nhanh mà không cần tải mô hình PhoBERT.",
     )
     parser.add_argument(
+        "--from-folders",
+        type=str,
+        default=None,
+        help="Đã có sẵn folder chứa file: chỉ cần chỉ vị trí gốc (mỗi folder con = 1 label), tự quét & gom ra CSV. Ví dụ: --from-folders ./my_data",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        choices=["mean", "max", "weighted"],
+        default="mean",
+        help="Phương pháp aggregate vector khi dùng --from-folders (Mặc định: mean).",
+    )
+    parser.add_argument(
+        "--no-append",
+        action="store_true",
+        help="Khi dùng --from-folders: ghi mới hoàn toàn CSV (mặc định gom tiếp, bỏ qua file trùng).",
+    )
+    parser.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Khi dùng --from-folders: chỉ quét file ngay trong folder label, không vào folder lồng nhau.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -668,6 +740,18 @@ def main() -> None:
             print(f"  • [{key}]: {item.name}")
             print(f"    Mô tả: {item.description}")
             print(f"    Từ khóa mẫu: {', '.join(item.search_keywords[:3])}\n")
+        sys.exit(0)
+
+    # 1b. Đã có sẵn folder chứa file -> chỉ cần vị trí, tự quét & gom CSV
+    if args.from_folders:
+        _execute_local_folders(
+            Path(args.from_folders),
+            output_csv_path,
+            method=args.method,
+            fast_test=args.fast_test,
+            append=not args.no_append,
+            recursive=not args.no_recursive,
+        )
         sys.exit(0)
 
     # 2. Topic counts argument: 'ai_tech=10,economy_finance=5'
