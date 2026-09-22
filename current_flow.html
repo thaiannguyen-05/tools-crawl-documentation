@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Current Flow — tools-crawl-documentation (pipeline → DB, no classifier)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background:#0f172a; color:#e2e8f0; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#94a3b8; font-size:13px; margin-bottom:18px; }
+  .grid { display:grid; grid-template-columns: 300px 1fr 300px; gap:16px; align-items:start; }
+  .col h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:#7dd3fc; margin:0 0 10px; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:12px 14px; margin-bottom:12px; }
+  .card h3 { font-size:14px; margin:0 0 6px; color:#fff; }
+  .card p, .card li { font-size:12.5px; line-height:1.5; color:#cbd5e1; }
+  .card ul { margin:6px 0 0; padding-left:16px; }
+  code { background:#0b1220; border:1px solid #334155; border-radius:6px; padding:1px 6px; font-size:11.5px; color:#fde68a; }
+  .file { color:#86efac; font-size:11.5px; }
+  .core { border:2px solid #38bdf8; }
+  .db { border:2px solid #a78bfa; }
+  .warn { background:#451a03; border:1px solid #9a3412; border-radius:8px; padding:8px 10px; font-size:12px; color:#fed7aa; margin-top:8px;}
+  .ok { background:#052e16; border:1px solid #166534; border-radius:8px; padding:8px 10px; font-size:12px; color:#bbf7d0; margin-top:8px;}
+  .step { display:flex; gap:10px; align-items:flex-start; background:#0b1220; border:1px solid #334155; border-radius:10px; padding:10px 12px; margin-bottom:8px;}
+  .n { flex:0 0 26px; height:26px; border-radius:50%; background:#38bdf8; color:#082f49; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:13px;}
+  .n.violet { background:#a78bfa; color:#2e1065;}
+  .n.green { background:#4ade80; color:#052e16;}
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:#94a3b8; margin-bottom:16px;}
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px;}
+  .flow { background:#0b1220; border:1px solid #334155; border-radius:12px; padding:16px; margin-bottom:16px; }
+  .flow pre { margin:0; font-size:12px; line-height:1.6; color:#e2e8f0; white-space:pre; overflow-x:auto; }
+  @media (max-width:1000px){ .grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<h1>Current Flow — tools-crawl-documentation <span style="color:#7dd3fc">pipeline → DB, no classifier</span></h1>
+<div class="sub">Pipeline chạy thẳng <code>extract → chunk → embed → save</code>. Label của CSV lấy từ tên folder / topic slug. Mọi lỗi DB đều fail-open.</div>
+
+<div class="legend">
+  <span><span class="dot" style="background:#38bdf8"></span>Core pipeline</span>
+  <span><span class="dot" style="background:#a78bfa"></span>Vector DB</span>
+  <span><span class="dot" style="background:#4ade80"></span>Outputs</span>
+</div>
+
+<div class="flow">
+<pre>ENTRY A: crawl.py                    ENTRY B: from-folders              ENTRY C: upload
+_execute_crawl_batch()               _execute_local_folders()           classify_file.ingest_file_name()
+  -&gt; crawl_single_topic()              -&gt; generate_training_data()        -&gt; extract_file()
+  -&gt; _handle_document_record()           -&gt; collect_files_by_label()      -&gt; ingest_document()
+       |                                   |                              -&gt; save + retrieve
+       +-----------+-----------------------+----------------+------------------+
+                   |
+                   v
+        processor.py: process_file_to_vector()
+          [1] extract_text() (.doc -&gt; .extracted.txt)
+          [2] chunk_document()
+          [3] chunk_to_input -&gt; segment_vietnamese -&gt; encode_fn()
+              (PhoBERT | --fast-test mock 64-dim)
+          [4] aggregate_chunk_vectors() -&gt; doc_vector (ghi CSV)
+          [5] if --save-db: save_ingested_document() [fail-open]
+                   |
+      +------------+------------+
+      |                         |
+      v                         v
+training_data.csv/.pkl    Postgres:5433/rag
+[vector,label,file_name]    documents (upsert fileName, chunkCount)
+  label = folder / topic    document_chunks (chunkIndex, text, heading,
+                             embedding::vector)
+                                    |
+                                    v
+                            query_similar() &lt;=&gt; cosine (no label filter)
+                            retrieve_similar_documents()
+                             -&gt; vector_dbs[] top-K</pre>
+</div>
+
+<div class="grid">
+<div class="col">
+<h2>① Entry points</h2>
+<div class="card">
+<h3>A. Crawl + streaming vectorize</h3>
+<p><span class="file">crawl.py:556 _execute_crawl_batch</span> → <span class="file">crawl.py:95 crawl_single_topic</span> → <span class="file">crawl.py:36 _handle_document_record</span></p>
+<ul>
+<li>Sources: GitHub md, Wikipedia txt, DDG pdf/docx, curated seeds, catch-up loop.</li>
+<li>Per download → <code>process_file_to_vector(..., save_db, db_url)</code> → append CSV row → optional <code>--delete-raw</code>.</li>
+<li>Flags: <code>--process / --delete-raw / --save-db / --db-url / --fast-test</code></li>
+</ul>
+</div>
+<div class="card">
+<h3>B. Existing folders → CSV + DB</h3>
+<p><span class="file">crawl.py:523 _execute_local_folders</span> / <span class="file">processor.py:242 generate_training_data</span></p>
+<ul>
+<li>Each level-1 subfolder = 1 label. <code>collect_files_by_label()</code>.</li>
+<li>Append mode: loads old CSV, dedups on <code>(label, file_name)</code>.</li>
+<li>Calls <code>process_file_to_vector(save_db, db_url)</code> per file.</li>
+</ul>
+</div>
+<div class="card">
+<h3>C. Upload-triggered ingest</h3>
+<p><span class="file">file_process/classify_file.py:24 ingest_file_name</span> (alias <code>classify_file_name</code> giữ tương thích NestJS)</p>
+<ul>
+<li><code>extract_file(fileName)</code> → <code>ingest_document()</code> → <code>save_ingested_document()</code> → <code>retrieve_similar_documents()</code>.</li>
+<li>CLI: <code>python -m file_process.classify_file &lt;fileName&gt; [--no-db] [--no-retrieve]</code>. Fail-open exit 0.</li>
+</ul>
+</div>
+</div>
+
+<div class="col">
+<h2>② Per-file pipeline (core)</h2>
+<div class="card core">
+<h3><span class="file">processor.py:121</span> process_file_to_vector()</h3>
+<div class="step"><div class="n">1</div><div><b>Extract</b> — <code>extract_text(name, bytes)</code>. Handles <code>.doc → .extracted.txt</code> companion. Empty / no-section → skip (None).</div></div>
+<div class="step"><div class="n">2</div><div><b>Chunk</b> — <code>chunk_document(doc)</code>. No chunks → skip.</div></div>
+<div class="step"><div class="n">3</div><div><b>Embed</b> — per chunk: <code>chunk_to_input → segment_vietnamese → encode_fn</code> (PhoBERT or 64-dim mock if <code>--fast-test</code>).</div></div>
+<div class="step"><div class="n">4</div><div><b>Aggregate</b> — <code>aggregate_chunk_vectors(mean|max|weighted)</code> → single doc vector for CSV.</div></div>
+<div class="step"><div class="n violet">5</div><div><b>Persist (only if <code>--save-db</code>)</b> — <code>vector_store.save_ingested_document(IngestedDocument(chunks), file_name, db_url)</code>. Upsert <code>documents</code> + delete + re-insert <code>document_chunks</code>. Any exception → warn, pipeline continues.</div></div>
+<div class="ok">Returns <code>{file_name, chunk_count, vector, vector_dim}</code> → caller writes CSV row <code>[vector, label, file_name]</code> (label = folder / topic, không qua predict).</div>
+<div class="warn">Fail-open: DB down / thiếu driver → log warning, CSV vẫn ghi đủ.</div>
+</div>
+
+<div class="card">
+<h3><span class="file">file_process/pipeline.py:101</span> ingest_document()</h3>
+<p>Extract → chunk → embed, trả về <code>list[ChunkWithEmbedding]</code> (chunk + embedding, không label). Token-budget sliding-window giữ nguyên. Helpers: <code>ingest_bytes / ingest_file</code>.</p>
+</div>
+</div>
+
+<div class="col">
+<h2>③ Outputs</h2>
+<div class="card">
+<h3><div class="n green" style="display:inline-flex">CSV</div> training_data.csv / .pkl</h3>
+<ul>
+<li><code>output/training_data.csv [vector, label, file_name]</code>, <code>.pkl {label: [vecs]}</code>, <code>*_summary.json</code>.</li>
+<li>Label = folder name (path B) or topic slug (path A).</li>
+</ul>
+</div>
+<div class="card db">
+<h3>Postgres + pgvector</h3>
+<p><span class="file">file_process/vector_store.py:28</span> — default <code>postgresql://postgres:postgres@localhost:5433/rag</code></p>
+<ul>
+<li><code>documents(id, fileName unique, chunkCount)</code> — upsert, không đụng tới <code>docType/confidence</code> cũ.</li>
+<li><code>document_chunks(documentId, chunkIndex, text, heading, embedding::vector(1024))</code> — <code>predictedLabel/labelProbs</code> ghi NULL.</li>
+<li>Vector literal <code>"[v1,v2,...]"</code>, <code>&lt;=&gt;</code> cosine + HNSW.</li>
+<li>KNN: <code>query_similar(emb, top_k)</code> không lọc label, <code>retrieve_similar_documents()</code> dedups <code>(fileName, chunkIndex)</code>, excludes self, returns <code>vector_dbs[]</code> top-K.</li>
+</ul>
+<div class="warn">Path C retrieves by default (<code>RAG_VECTOR_DB_ENABLED</code>); <code>--no-retrieve / --no-db</code> disables. Top-K via <code>RAG_RETRIEVAL_TOP_K</code> / <code>--top-k</code>.</div>
+</div>
+<div class="card">
+<h3>Config</h3>
+<ul>
+<li><code>.env.example</code> → <code>.env</code>: <code>DATABASE_URL, RAG_VECTOR_DB_ENABLED, RAG_RETRIEVAL_TOP_K</code>.</li>
+<li><code>file_process/settings.py</code> resolves all of the above.</li>
+<li><code>psycopg2-binary</code> in <code>requirements.txt</code>.</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div class="sub" style="margin-top:18px">Flow: Entry (A/B/C) → Extract → Chunk → Embed → Aggregate (CSV) → [Postgres nếu --save-db] → CSV + DB. Đã xóa: <code>classifier.py</code>, <code>classifier-model/</code>, mọi <code>doc_type/confidence/predicted_label</code>.</div>
+</body>
+</html>
