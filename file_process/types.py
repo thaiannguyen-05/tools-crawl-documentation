@@ -45,3 +45,8 @@ class Chunk:
 class ChunkWithEmbedding:
     chunk: Chunk
     embedding: list[float]
+
+
+@dataclass(frozen=True)
+class IngestedDocument:
+    chunks: list[ChunkWithEmbedding]

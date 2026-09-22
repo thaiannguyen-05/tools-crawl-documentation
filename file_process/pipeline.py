@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from . import settings
 from .chunker import chunk_document
@@ -13,7 +12,12 @@ from .tokenizer import (
     estimate_tokens,
     segment_vietnamese,
 )
-from .types import Chunk, ChunkWithEmbedding, ExtractedDocument, FileMetadata
+from .types import (
+    Chunk,
+    ChunkWithEmbedding,
+    ExtractedDocument,
+    FileMetadata,
+)
 
 def aggregate_mean(chunks: list[list[float]]) -> list[float]:
     n = len(chunks)
@@ -62,10 +66,10 @@ def aggregate_embeddings(
 ) -> list[float]:
     return aggregate_chunk_vectors(embeddings, method)
 
+
 logger = logging.getLogger(__name__)
 
 MIN_MAX_TOKENS = 8
-
 
 def describe_metadata(meta: FileMetadata) -> str:
     parts = [meta.file_name, meta.extension]
