@@ -42,6 +42,8 @@ def _handle_document_record(
     delete_raw: bool,
     downloaded_items: list[dict],
     target_records: int,
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> bool:
     """Process a downloaded file into a vector, append to CSV, and delete raw file if requested."""
     file_path = topic_dir / res["file_name"]
@@ -49,7 +51,7 @@ def _handle_document_record(
     if encode_fn is not None and output_csv_path is not None:
         from processor import process_file_to_vector
 
-        vec_info = process_file_to_vector(file_path, encode_fn=encode_fn, method="mean")
+        vec_info = process_file_to_vector(file_path, encode_fn=encode_fn, method="mean", save_db=save_db, db_url=db_url)
         if vec_info:
             output_csv_path.parent.mkdir(parents=True, exist_ok=True)
             write_header = not output_csv_path.exists() or output_csv_path.stat().st_size == 0
@@ -98,6 +100,8 @@ def crawl_single_topic(
     encode_fn: Callable[[str], list[float]] | None = None,
     output_csv_path: Path | None = None,
     delete_raw: bool = False,
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> dict:
     """Crawl documents for a single topic with exact target records limit and optional streaming vectorization."""
     if topic_key_or_name in FAMOUS_TOPICS:
@@ -185,7 +189,8 @@ def crawl_single_topic(
                         seen_urls.add(url)
                         if _handle_document_record(
                             res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                            delete_raw, downloaded_items, target_records
+                            delete_raw, downloaded_items, target_records,
+                            save_db, db_url
                         ):
                             downloaded_for_fmt += 1
                         time.sleep(0.3)
@@ -214,7 +219,8 @@ def crawl_single_topic(
                         seen_urls.add(url)
                         if _handle_document_record(
                             res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                            delete_raw, downloaded_items, target_records
+                            delete_raw, downloaded_items, target_records,
+                            save_db, db_url
                         ):
                             downloaded_for_fmt += 1
                         time.sleep(0.3)
@@ -241,7 +247,8 @@ def crawl_single_topic(
                     seen_urls.add(url)
                     if _handle_document_record(
                         res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                        delete_raw, downloaded_items, target_records
+                        delete_raw, downloaded_items, target_records,
+                        save_db, db_url
                     ):
                         downloaded_for_fmt += 1
                     time.sleep(0.4)
@@ -266,7 +273,8 @@ def crawl_single_topic(
                         seen_urls.add(seed_url)
                         if _handle_document_record(
                             res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                            delete_raw, downloaded_items, target_records
+                            delete_raw, downloaded_items, target_records,
+                            save_db, db_url
                         ):
                             downloaded_for_fmt += 1
                         time.sleep(0.3)
@@ -299,7 +307,8 @@ def crawl_single_topic(
                     seen_urls.add(url)
                     _handle_document_record(
                         res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                        delete_raw, downloaded_items, target_records
+                        delete_raw, downloaded_items, target_records,
+                        save_db, db_url
                     )
                     time.sleep(0.2)
 
@@ -323,7 +332,8 @@ def crawl_single_topic(
                     seen_urls.add(url)
                     _handle_document_record(
                         res, topic_dir, topic_slug, encode_fn, output_csv_path,
-                        delete_raw, downloaded_items, target_records
+                        delete_raw, downloaded_items, target_records,
+                        save_db, db_url
                     )
                     time.sleep(0.3)
 
@@ -517,6 +527,8 @@ def _execute_local_folders(
     fast_test: bool = False,
     append: bool = True,
     recursive: bool = True,
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> None:
     """Vector hoá các folder có sẵn: mỗi folder con = 1 label, gom vào cùng 1 CSV."""
     from processor import generate_training_data
@@ -536,6 +548,8 @@ def _execute_local_folders(
         output_csv_path=output_csv_path,
         append=append,
         recursive=recursive,
+        save_db=save_db,
+        db_url=db_url,
     )
 
 
@@ -547,6 +561,8 @@ def _execute_crawl_batch(
     delete_raw: bool = False,
     fast_test: bool = False,
     output_csv_path: Path | None = None,
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> None:
     """Execute crawling for a mapping of topic -> target_records with optional streaming vectorization."""
     if output_csv_path is None:
@@ -576,6 +592,8 @@ def _execute_crawl_batch(
             encode_fn=encode_fn,
             output_csv_path=output_csv_path,
             delete_raw=delete_raw,
+            save_db=save_db,
+            db_url=db_url,
         )
         downloaded = res["total_documents"]
         summary[key] = (downloaded, count)
@@ -696,6 +714,17 @@ def main() -> None:
         help="Dùng mock encoder để kiểm thử quy trình nhanh mà không cần tải mô hình PhoBERT.",
     )
     parser.add_argument(
+        "--save-db",
+        action="store_true",
+        help="Lưu chunk vectors từng file vào Postgres/pgvector (DATABASE_URL). Fail-open khi DB lỗi.",
+    )
+    parser.add_argument(
+        "--db-url",
+        type=str,
+        default=None,
+        help="Postgres URL (Mặc định: DATABASE_URL hoặc postgresql://postgres:postgres@localhost:5433/rag).",
+    )
+    parser.add_argument(
         "--from-folders",
         type=str,
         default=None,
@@ -751,6 +780,8 @@ def main() -> None:
             fast_test=args.fast_test,
             append=not args.no_append,
             recursive=not args.no_recursive,
+            save_db=args.save_db,
+            db_url=args.db_url,
         )
         sys.exit(0)
 
@@ -764,6 +795,7 @@ def main() -> None:
             counts, args.formats, output_base_dir,
             auto_process=auto_process, delete_raw=delete_raw,
             fast_test=args.fast_test, output_csv_path=output_csv_path,
+            save_db=args.save_db, db_url=args.db_url,
         )
         sys.exit(0)
 
@@ -775,6 +807,7 @@ def main() -> None:
             counts, args.formats, output_base_dir,
             auto_process=auto_process, delete_raw=delete_raw,
             fast_test=args.fast_test, output_csv_path=output_csv_path,
+            save_db=args.save_db, db_url=args.db_url,
         )
         sys.exit(0)
 
@@ -786,6 +819,7 @@ def main() -> None:
             counts, args.formats, output_base_dir,
             auto_process=auto_process, delete_raw=delete_raw,
             fast_test=args.fast_test, output_csv_path=output_csv_path,
+            save_db=args.save_db, db_url=args.db_url,
         )
         sys.exit(0)
 

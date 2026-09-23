@@ -44,3 +44,19 @@ def reserved_tokens() -> int:
 
 def batch_size() -> int:
     return _int_env("RAG_BATCH_SIZE", DEFAULT_BATCH_SIZE, minimum=1)
+
+
+def vector_db_enabled() -> bool:
+    raw = os.environ.get("RAG_VECTOR_DB_ENABLED", "").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def vector_db_url(default: str = "postgresql://postgres:postgres@localhost:5433/rag") -> str:
+    raw = os.environ.get("DATABASE_URL", "").strip()
+    return raw or default
+
+
+def retrieval_top_k(default: int = 10) -> int:
+    return _int_env("RAG_RETRIEVAL_TOP_K", default, minimum=1)
+
+

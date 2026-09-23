@@ -22,7 +22,7 @@ from file_process.errors import StorageError, UnsupportedFileError
 from file_process.pipeline import chunk_to_input
 from file_process.text_extractor import extract_text
 from file_process.tokenizer import segment_vietnamese
-from file_process.types import ChunkWithEmbedding, ExtractedDocument
+from file_process.types import ExtractedDocument
 
 logger = logging.getLogger("pipeline_processor")
 
@@ -122,6 +122,8 @@ def process_file_to_vector(
     file_path: Path,
     encode_fn: Callable[[str], list[float]],
     method: str = "mean",
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> dict[str, Any] | None:
     """Run a single file through the RAG pipeline up to vector aggregation.
     
@@ -169,6 +171,25 @@ def process_file_to_vector(
         # 4. Aggregate chunk vectors into a single document vector
         doc_vector = aggregate_chunk_vectors(chunk_embeddings, method=method)
 
+        if save_db:
+            try:
+                from file_process.types import ChunkWithEmbedding as _CWE
+                from file_process.types import IngestedDocument as _IDoc
+                from file_process.vector_store import save_ingested_document
+
+                save_ingested_document(
+                    _IDoc(
+                        chunks=[
+                            _CWE(chunk=c, embedding=e)
+                            for c, e in zip(chunks, chunk_embeddings)
+                        ]
+                    ),
+                    file_path.name,
+                    db_url=db_url,
+                )
+            except Exception as exc:
+                logger.warning("vector db save skipped: file=%s error=%s", file_path.name, exc)
+
         return {
             "file_name": file_path.name,
             "file_path": str(file_path),
@@ -195,6 +216,8 @@ def generate_training_data(
     output_csv_path: Path | None = None,
     append: bool = True,
     recursive: bool = True,
+    save_db: bool = False,
+    db_url: str | None = None,
 ) -> dict[str, list[list[float]]]:
     """Quét các folder con (mỗi folder = 1 label), vector hoá và gom vào cùng 1 file CSV.
 
@@ -280,7 +303,7 @@ def generate_training_data(
                 rel = file_path
             print(f"   ⏳ Đang chạy pipeline cho: {rel}...")
             start_t = time.time()
-            res = process_file_to_vector(file_path, encode_fn=encode_fn, method=method)
+            res = process_file_to_vector(file_path, encode_fn=encode_fn, method=method, save_db=save_db, db_url=db_url)
             elapsed = time.time() - start_t
 
             if res:
@@ -428,6 +451,17 @@ def main() -> None:
         help="Chỉ quét file ở ngay trong folder label, không vào folder lồng nhau.",
     )
     parser.add_argument(
+        "--save-db",
+        action="store_true",
+        help="Lưu chunk vectors từng file vào Postgres/pgvector (DATABASE_URL). Fail-open khi DB lỗi.",
+    )
+    parser.add_argument(
+        "--db-url",
+        type=str,
+        default=None,
+        help="Postgres URL (Mặc định: DATABASE_URL hoặc postgresql://postgres:postgres@localhost:5433/rag).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -449,6 +483,8 @@ def main() -> None:
         output_csv_path=output_csv_path,
         append=not args.no_append,
         recursive=not args.no_recursive,
+        save_db=args.save_db,
+        db_url=args.db_url,
     )
 
 

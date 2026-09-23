@@ -257,6 +257,24 @@ Lưu dưới dạng dictionary Python:
 
 ---
 
+## 🗄️ Lưu Vector / Postgres (Port từ `rag-scratch/apps/knn`)
+
+Pipeline `file_process/` chạy thẳng `extract -> chunk -> embed`, không qua lớp phân loại:
+label của `training_data.csv` lấy từ tên folder / topic slug.
+
+* DB mặc định `postgresql://postgres:postgres@localhost:5433/rag` (khớp `docker-compose` bên `rag-scratch`,
+  bảng `documents` + `document_chunks`). Copy `.env.example` thành `.env` để cấu hình `DATABASE_URL`.
+* Dùng `--save-db` để vừa ghi CSV vừa upsert chunk vectors vào Postgres.
+  Mọi lỗi DB đều fail-open: ghi warning, không chặn pipeline.
+
+```bash
+python processor.py --input-dir ./my_data --save-db
+python crawl.py --from-folders ./my_data --save-db
+python crawl.py --topic ai_tech --count 5 --process --save-db --fast-test  # test CSV bằng mock encoder
+```
+
+---
+
 ## 🎯 Mục Đích Dữ Liệu Đầu Ra
 
 Toàn bộ file **`output/training_data.csv`** (hoặc `training_data.pkl`) được tạo ra chính là tập dữ liệu huấn luyện (Training Dataset) đã được gắn nhãn thể loại, sẵn sàng để:
@@ -283,3 +301,5 @@ Toàn bộ file **`output/training_data.csv`** (hoặc `training_data.pkl`) đư
 | `--no-recursive` | | Không quét folder lồng nhau | `python crawl.py --from-folders ./my_data --no-recursive` |
 | `--list-topics` | | Xem danh sách 5 chủ đề mẫu | `python crawl.py --list-topics` |
 | `--verbose` | `-v` | Bật log debug chi tiết | `python crawl.py -v` |
+| `--save-db` | | Lưu chunk vectors vào Postgres/pgvector | `python processor.py --input-dir ./my_data --save-db` |
+| `--db-url` | | Postgres URL (mặc định: `DATABASE_URL`) | `python processor.py --save-db --db-url postgresql://postgres:postgres@localhost:5433/rag` |

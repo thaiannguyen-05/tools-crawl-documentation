@@ -22,3 +22,6 @@ protobuf>=3.20.0
 
 # Data Analysis & Handling
 pandas>=2.0.0
+
+# KNN / Vector DB (Postgres + pgvector, ported from rag-scratch/apps/knn)
+psycopg2-binary>=2.9.0
